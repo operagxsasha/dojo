@@ -562,4 +562,3 @@ fn filter_events_by_params(
     }
     (filtered_events, index)
 }
-
