@@ -1,3 +1,6 @@
+use crate::hooker::{HookerAddresses, KatanaHooker};
+use tokio::sync::RwLock as AsyncRwLock;
+
 use std::cmp::Ordering;
 use std::iter::Skip;
 use std::slice::Iter;
@@ -52,6 +55,7 @@ pub struct KatanaSequencer<EF: ExecutorFactory> {
     pub pool: Arc<TransactionPool>,
     pub backend: Arc<Backend<EF>>,
     pub block_producer: Arc<BlockProducer<EF>>,
+    pub hooker: Arc<AsyncRwLock<dyn KatanaHooker<EF> + Send + Sync>>,
 }
 
 impl<EF: ExecutorFactory> KatanaSequencer<EF> {
@@ -59,6 +63,7 @@ impl<EF: ExecutorFactory> KatanaSequencer<EF> {
         executor_factory: EF,
         config: SequencerConfig,
         starknet_config: StarknetConfig,
+        hooker: Arc<AsyncRwLock<dyn KatanaHooker<EF> + Send + Sync>>,
     ) -> anyhow::Result<Self> {
         let executor_factory = Arc::new(executor_factory);
         let backend = Arc::new(Backend::new(executor_factory.clone(), starknet_config).await);
@@ -78,7 +83,9 @@ impl<EF: ExecutorFactory> KatanaSequencer<EF> {
 
         #[cfg(feature = "messaging")]
         let messaging = if let Some(config) = config.messaging.clone() {
-            MessagingService::new(config, Arc::clone(&pool), Arc::clone(&backend)).await.ok()
+            MessagingService::new(config, Arc::clone(&pool), Arc::clone(&backend), hooker.clone())
+                .await
+                .ok()
         } else {
             None
         };
@@ -93,7 +100,7 @@ impl<EF: ExecutorFactory> KatanaSequencer<EF> {
             messaging,
         ));
 
-        Ok(Self { pool, config, backend, block_producer })
+        Ok(Self { pool, config, backend, block_producer, hooker })
     }
 
     /// Returns the pending state if the sequencer is running in _interval_ mode. Otherwise `None`.
@@ -286,10 +293,13 @@ impl<EF: ExecutorFactory> KatanaSequencer<EF> {
 
         let tx @ Some(_) = tx else {
             return Ok(self.pending_executor().as_ref().and_then(|exec| {
-                exec.read()
-                    .transactions()
-                    .iter()
-                    .find_map(|tx| if tx.0.hash == *hash { Some(tx.0.clone()) } else { None })
+                exec.read().transactions().iter().find_map(|tx| {
+                    if tx.0.hash == *hash {
+                        Some(tx.0.clone())
+                    } else {
+                        None
+                    }
+                })
             }));
         };
 
@@ -497,26 +507,28 @@ fn filter_events_by_params(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::hooker::DefaultKatanaHooker;
     use katana_executor::implementation::noop::NoopExecutorFactory;
     use katana_provider::traits::block::BlockNumberProvider;
-
-    use super::{KatanaSequencer, SequencerConfig};
-    use crate::backend::config::StarknetConfig;
-
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
     #[tokio::test]
     async fn init_interval_block_producer_with_correct_block_env() {
         let executor_factory = NoopExecutorFactory::default();
+        let hooker = DefaultKatanaHooker::<NoopExecutorFactory>::new();
+        let hooker_arc = Arc::new(RwLock::new(hooker));
 
         let sequencer = KatanaSequencer::new(
             executor_factory,
             SequencerConfig { no_mining: true, ..Default::default() },
             StarknetConfig::default(),
+            hooker_arc, // Pass the hooker instance here
         )
         .await
         .unwrap();
 
         let provider = sequencer.backend.blockchain.provider();
-
         let latest_num = provider.latest_number().unwrap();
         let producer_block_env = sequencer.pending_executor().unwrap().read().block_env();
 

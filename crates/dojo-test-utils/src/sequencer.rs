@@ -4,9 +4,11 @@ use jsonrpsee::core::Error;
 pub use katana_core::backend::config::{Environment, StarknetConfig};
 use katana_core::constants::MAX_RECURSION_DEPTH;
 use katana_core::env::get_default_vm_resource_fee_cost;
+use katana_core::hooker::DefaultKatanaHooker;
 use katana_core::sequencer::KatanaSequencer;
 pub use katana_core::sequencer::SequencerConfig;
 use katana_executor::implementation::blockifier::BlockifierFactory;
+use katana_executor::implementation::noop::NoopExecutorFactory;
 use katana_executor::SimulationFlag;
 use katana_primitives::chain::ChainId;
 use katana_primitives::env::{CfgEnv, FeeTokenAddressses};
@@ -19,6 +21,7 @@ use starknet::core::types::{BlockId, BlockTag, FieldElement};
 use starknet::providers::jsonrpc::HttpTransport;
 use starknet::providers::JsonRpcClient;
 use starknet::signers::{LocalWallet, SigningKey};
+use tokio::sync::RwLock;
 use url::Url;
 
 pub struct TestAccount {
@@ -56,8 +59,11 @@ impl TestSequencer {
 
         let executor_factory = BlockifierFactory::new(cfg_env, simulation_flags);
 
+        let mut hooker = DefaultKatanaHooker::<BlockifierFactory>::new();
+        let hooker_arc = Arc::new(RwLock::new(hooker));
+
         let sequencer = Arc::new(
-            KatanaSequencer::new(executor_factory, config, starknet_config)
+            KatanaSequencer::new(executor_factory, config, starknet_config, hooker_arc)
                 .await
                 .expect("Failed to create sequencer"),
         );
@@ -75,6 +81,7 @@ impl TestSequencer {
                     ApiKind::Dev,
                     ApiKind::Saya,
                     ApiKind::Torii,
+                    ApiKind::Solis,
                 ],
             },
         )

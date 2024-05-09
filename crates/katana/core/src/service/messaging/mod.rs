@@ -32,6 +32,10 @@
 //! configuration file following the `MessagingConfig` format. An example of this file can be found
 //! in the messaging contracts.
 
+use crate::hooker::KatanaHooker;
+use std::sync::Arc;
+use tokio::sync::RwLock as AsyncRwLock;
+
 mod ethereum;
 mod service;
 #[cfg(feature = "starknet-messaging")]
@@ -169,7 +173,10 @@ pub enum MessengerMode {
 }
 
 impl MessengerMode {
-    pub async fn from_config(config: MessagingConfig) -> MessengerResult<Self> {
+    pub async fn from_config<EF: katana_executor::ExecutorFactory>(
+        config: MessagingConfig,
+        hooker: Arc<AsyncRwLock<dyn KatanaHooker<EF>>>,
+    ) -> MessengerResult<Self> {
         match config.chain.as_str() {
             CONFIG_CHAIN_ETHEREUM => match EthereumMessaging::new(config).await {
                 Ok(m_eth) => {

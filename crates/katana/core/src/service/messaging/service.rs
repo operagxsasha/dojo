@@ -1,7 +1,5 @@
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
-use std::time::Duration;
+use crate::hooker::KatanaHooker;
+use tokio::sync::RwLock as AsyncRwLock;
 
 use futures::{Future, FutureExt, Stream};
 use katana_executor::ExecutorFactory;
@@ -10,6 +8,10 @@ use katana_primitives::receipt::MessageToL1;
 use katana_primitives::transaction::{ExecutableTxWithHash, L1HandlerTx, TxHash};
 use katana_provider::traits::block::BlockNumberProvider;
 use katana_provider::traits::transaction::ReceiptProvider;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
+use std::time::Duration;
 use tokio::time::{interval_at, Instant, Interval};
 use tracing::{error, info};
 
@@ -45,10 +47,11 @@ impl<EF: ExecutorFactory> MessagingService<EF> {
         config: MessagingConfig,
         pool: Arc<TransactionPool>,
         backend: Arc<Backend<EF>>,
+        hooker: Arc<AsyncRwLock<dyn KatanaHooker<EF> + Send + Sync>>,
     ) -> anyhow::Result<Self> {
         let gather_from_block = config.from_block;
         let interval = interval_from_seconds(config.interval);
-        let messenger = match MessengerMode::from_config(config).await {
+        let messenger = match MessengerMode::from_config(config, hooker).await {
             Ok(m) => Arc::new(m),
             Err(_) => {
                 panic!(

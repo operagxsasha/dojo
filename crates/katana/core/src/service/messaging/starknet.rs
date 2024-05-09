@@ -1,3 +1,6 @@
+use crate::hooker::KatanaHooker;
+use tokio::sync::RwLock as AsyncRwLock;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -29,16 +32,20 @@ const EXE_MAGIC: FieldElement = felt!("0x455845");
 
 pub const HASH_EXEC: FieldElement = felt!("0xee");
 
-pub struct StarknetMessaging {
+pub struct StarknetMessaging<EF: katana_executor::ExecutorFactory> {
     chain_id: FieldElement,
     provider: AnyProvider,
     wallet: LocalWallet,
     sender_account_address: FieldElement,
     messaging_contract_address: FieldElement,
+    hooker: Arc<AsyncRwLock<dyn KatanaHooker<EF> + Send + Sync>>,
 }
 
-impl StarknetMessaging {
-    pub async fn new(config: MessagingConfig) -> Result<StarknetMessaging> {
+impl<EF: katana_executor::ExecutorFactory> StarknetMessaging {
+    pub async fn new(
+        config: MessagingConfig,
+        hooker: Arc<AsyncRwLock<dyn KatanaHooker<EF> + Send + Sync>>,
+    ) -> Result<StarknetMessaging> {
         let provider = AnyProvider::JsonRpcHttp(JsonRpcClient::new(HttpTransport::new(
             Url::parse(&config.rpc_url)?,
         )));
@@ -57,6 +64,7 @@ impl StarknetMessaging {
             chain_id,
             sender_account_address,
             messaging_contract_address,
+            hooker,
         })
     }
 
@@ -125,7 +133,19 @@ impl StarknetMessaging {
         let estimated_fee = (execution.estimate_fee().await?.overall_fee) * 10u64.into();
         let tx = execution.max_fee(estimated_fee).send().await?;
 
-        Ok(tx.transaction_hash)
+        // We need logs to debug the starknet transactions.
+        match execution.send().await {
+            Ok(tx) => {
+                info!("Transaction successful: {:?}", tx);
+                println!("tx: {:?}", tx);
+                println!("tx_hash: {:?}", tx.transaction_hash);
+                Ok(tx.transaction_hash)
+            }
+            Err(e) => {
+                error!("Error sending transaction: {:?}", e);
+                Err(e.into())
+            }
+        }
     }
 
     /// Sends messages hashes to settlement layer by sending a transaction.
@@ -210,7 +230,18 @@ impl Messenger for StarknetMessaging {
 
                 block_events.iter().for_each(|e| {
                     if let Ok(tx) = l1_handler_tx_from_event(e, chain_id) {
-                        l1_handler_txs.push(tx)
+                        if let Ok((from, to, selector)) = info_from_event(e) {
+                            let is_message_accepted = self
+                                .hooker
+                                .read()
+                                .await
+                                .verify_message_to_appchain(from, to, selector)
+                                .await;
+
+                            if is_message_accepted {
+                                l1_handler_txs.push(tx)
+                            }
+                        }
                     }
                 })
             });
@@ -228,18 +259,23 @@ impl Messenger for StarknetMessaging {
 
         let (hashes, calls) = parse_messages(messages)?;
 
-        if !calls.is_empty() {
-            match self.send_invoke_tx(calls).await {
-                Ok(tx_hash) => {
-                    trace!(target: LOG_TARGET, tx_hash = %format!("{:#064x}", tx_hash), "Invoke transaction hash.");
-                }
-                Err(e) => {
-                    error!(target: LOG_TARGET, error = %e, "Sending invoke tx on Starknet.");
-                    return Err(Error::SendError);
-                }
-            };
+        for call in &calls {
+            if !self.hooker.read().await.verify_tx_for_starknet(call.clone()).await {
+                continue;
+            }
+            if !calls.is_empty() {
+                match self.send_invoke_tx(calls).await {
+                    Ok(tx_hash) => {
+                        trace!(target: LOG_TARGET, tx_hash = %format!("{:#064x}", tx_hash), "Invoke transaction hash.");
+                    }
+                    Err(e) => {
+                        error!(target: LOG_TARGET, error = %e, "Sending invoke tx on Starknet.");
+                        self.hooker.read().await.on_starknet_tx_failed(call.clone()).await;
+                        return Err(Error::SendError);
+                    }
+                };
+            }
         }
-
         self.send_hashes(hashes.clone()).await?;
 
         Ok(hashes)
@@ -349,6 +385,27 @@ fn l1_handler_tx_from_event(event: &EmittedEvent, chain_id: ChainId) -> Result<L
         version: FieldElement::ZERO,
         contract_address: to_address.into(),
     })
+}
+
+fn info_from_event(event: &EmittedEvent) -> Result<(FieldElement, FieldElement, FieldElement)> {
+    if event.keys[0] != selector!("MessageSentToAppchain") {
+        debug!(
+            target: LOG_TARGET,
+            "Event with key {:?} can't be converted into L1HandlerTx", event.keys[0],
+        );
+        return Err(Error::GatherError.into());
+    }
+
+    if event.keys.len() != 4 || event.data.len() < 2 {
+        error!(target: LOG_TARGET, "Event MessageSentToAppchain is not well formatted");
+    }
+
+    // See contrat appchain_messaging.cairo for MessageSentToAppchain event.
+    let from_address = event.keys[2];
+    let to_address = event.keys[3];
+    let entry_point_selector = event.data[0];
+
+    Ok((from_address, to_address, entry_point_selector))
 }
 
 #[cfg(test)]

@@ -23,6 +23,7 @@ use katana_executor::ExecutorFactory;
 use katana_rpc_api::dev::DevApiServer;
 use katana_rpc_api::katana::KatanaApiServer;
 use katana_rpc_api::saya::SayaApiServer;
+use katana_rpc_api::solis::SolisApiServer;
 use katana_rpc_api::starknet::StarknetApiServer;
 use katana_rpc_api::torii::ToriiApiServer;
 use katana_rpc_api::ApiKind;
@@ -34,6 +35,7 @@ use crate::katana::KatanaApi;
 use crate::saya::SayaApi;
 use crate::starknet::StarknetApi;
 use crate::torii::ToriiApi;
+use crate::solis::SolisApi;
 
 pub async fn spawn<EF: ExecutorFactory>(
     sequencer: Arc<KatanaSequencer<EF>>,
@@ -58,6 +60,9 @@ pub async fn spawn<EF: ExecutorFactory>(
             }
             ApiKind::Saya => {
                 methods.merge(SayaApi::new(sequencer.clone()).into_rpc())?;
+            }
+            ApiKind::Solis => {
+                methods.merge(SolisApi::new(sequencer.clone()).into_rpc())?;
             }
         }
     }
