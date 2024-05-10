@@ -230,7 +230,7 @@ impl KatanaArgs {
     }
 
     pub fn server_config(&self) -> ServerConfig {
-        let mut apis = vec![ApiKind::Starknet, ApiKind::Katana, ApiKind::Torii, ApiKind::Saya];
+        let mut apis = vec![ApiKind::Starknet, ApiKind::Katana, ApiKind::Torii, ApiKind::Saya, ApiKind::Solis];
         // only enable `katana` API in dev mode
         if self.dev {
             apis.push(ApiKind::Dev);

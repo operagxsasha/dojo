@@ -7,6 +7,7 @@ pub mod metrics;
 pub mod saya;
 pub mod starknet;
 pub mod torii;
+pub mod solis;
 
 use std::net::SocketAddr;
 use std::sync::Arc;

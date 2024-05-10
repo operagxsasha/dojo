@@ -1,4 +1,4 @@
-use crate::hooker::{HookerAddresses, KatanaHooker};
+use crate::hooker::KatanaHooker;
 use tokio::sync::RwLock as AsyncRwLock;
 
 use std::cmp::Ordering;

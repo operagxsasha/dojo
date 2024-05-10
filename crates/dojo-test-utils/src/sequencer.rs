@@ -75,6 +75,8 @@ impl TestSequencer {
                 host: "127.0.0.1".into(),
                 max_connections: 100,
                 allowed_origins: None,
+                rpc_password: "password".into(),
+                rpc_user: "user".into(),
                 apis: vec![
                     ApiKind::Starknet,
                     ApiKind::Katana,
