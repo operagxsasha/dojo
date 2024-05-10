@@ -1,4 +1,3 @@
-use katana_core::hooker::DefaultKatanaHooker;
 use alloy_primitives::U256;
 use katana_core::backend::config::StarknetConfig;
 use katana_core::sequencer::{KatanaSequencer, SequencerConfig};
@@ -8,8 +7,6 @@ use katana_primitives::genesis::constant::DEFAULT_PREFUNDED_ACCOUNT_BALANCE;
 use katana_primitives::genesis::Genesis;
 use katana_provider::traits::block::{BlockNumberProvider, BlockProvider};
 use katana_provider::traits::env::BlockEnvProvider;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 fn create_test_sequencer_config() -> (SequencerConfig, StarknetConfig) {
     let accounts = DevAllocationsGenerator::new(2)
@@ -27,13 +24,8 @@ fn create_test_sequencer_config() -> (SequencerConfig, StarknetConfig) {
 
 async fn create_test_sequencer() -> KatanaSequencer<NoopExecutorFactory> {
     let executor_factory = NoopExecutorFactory::new();
-    let hooker = DefaultKatanaHooker::<NoopExecutorFactory>::new();
-    let hooker_arc = Arc::new(RwLock::new(hooker));
-
     let (sequencer_config, starknet_config) = create_test_sequencer_config();
-    KatanaSequencer::new(executor_factory, sequencer_config, starknet_config, hooker_arc)
-        .await
-        .unwrap()
+    KatanaSequencer::new(executor_factory, sequencer_config, starknet_config, None).await.unwrap()
 }
 
 #[tokio::test]

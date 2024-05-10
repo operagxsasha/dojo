@@ -2,12 +2,12 @@ use base64::decode;
 use std::sync::Arc;
 
 use crate::config::ServerConfig;
-use jsonrpsee::core::{async_trait, Error};
+use jsonrpsee::core::{async_trait, Error as RpcError};
+use katana_rpc_types::error::solis::SolisApiError;
 use katana_core::hooker::HookerAddresses;
 use katana_core::sequencer::KatanaSequencer;
 use katana_executor::ExecutorFactory;
 use katana_rpc_api::solis::SolisApiServer;
-
 pub struct SolisApi<EF: ExecutorFactory> {
     sequencer: Arc<KatanaSequencer<EF>>,
     pub rpc_user: String,
@@ -43,13 +43,17 @@ impl<EF: ExecutorFactory> SolisApiServer for SolisApi<EF> {
         &self,
         addresses: HookerAddresses,
         basic_auth: String,
-    ) -> Result<(), Error> {
+    ) -> Result<(), RpcError> {
         if !self.verify_basic_auth(&basic_auth) {
-            panic!("authentication failed");
+            return Err(SolisApiError::AuthenticationFailed.to_rpc_error());
         }
 
-        let mut hooker = self.sequencer.hooker.write().await;
-        hooker.set_addresses(addresses);
-        Ok(())
+        if let Some(hooker_lock) = self.sequencer.hooker.as_ref() {
+            let mut hooker = hooker_lock.write().await;
+            hooker.set_addresses(addresses);
+            Ok(())
+        } else {
+            return Err(SolisApiError::HookerServiceUnavailable.to_rpc_error());
+        }
     }
 }

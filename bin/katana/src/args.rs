@@ -242,6 +242,8 @@ impl KatanaArgs {
             host: self.server.host.clone().unwrap_or("0.0.0.0".into()),
             max_connections: self.server.max_connections,
             allowed_origins: self.server.allowed_origins.clone(),
+            rpc_user: "user".into(),
+            rpc_password: "password".into(),
         }
     }
 

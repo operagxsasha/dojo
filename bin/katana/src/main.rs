@@ -93,8 +93,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     }
 
-    let sequencer =
-        Arc::new(KatanaSequencer::new(executor_factory, sequencer_config, starknet_config).await?);
+    let sequencer = Arc::new(
+        KatanaSequencer::new(executor_factory, sequencer_config, starknet_config, None).await?,
+    );
     let NodeHandle { addr, handle, .. } = spawn(Arc::clone(&sequencer), server_config).await?;
 
     if !args.silent {

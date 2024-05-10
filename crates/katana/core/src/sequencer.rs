@@ -55,7 +55,7 @@ pub struct KatanaSequencer<EF: ExecutorFactory> {
     pub pool: Arc<TransactionPool>,
     pub backend: Arc<Backend<EF>>,
     pub block_producer: Arc<BlockProducer<EF>>,
-    pub hooker: Arc<AsyncRwLock<dyn KatanaHooker<EF> + Send + Sync>>,
+    pub hooker: Option<Arc<AsyncRwLock<dyn KatanaHooker<EF> + Send + Sync>>>,
 }
 
 impl<EF: ExecutorFactory> KatanaSequencer<EF> {
@@ -63,7 +63,7 @@ impl<EF: ExecutorFactory> KatanaSequencer<EF> {
         executor_factory: EF,
         config: SequencerConfig,
         starknet_config: StarknetConfig,
-        hooker: Arc<AsyncRwLock<dyn KatanaHooker<EF> + Send + Sync>>,
+        hooker: Option<Arc<AsyncRwLock<dyn KatanaHooker<EF> + Send + Sync>>>,
     ) -> anyhow::Result<Self> {
         let executor_factory = Arc::new(executor_factory);
         let backend = Arc::new(Backend::new(executor_factory.clone(), starknet_config).await);
@@ -83,9 +83,17 @@ impl<EF: ExecutorFactory> KatanaSequencer<EF> {
 
         #[cfg(feature = "messaging")]
         let messaging = if let Some(config) = config.messaging.clone() {
-            MessagingService::new(config, Arc::clone(&pool), Arc::clone(&backend), hooker.clone())
+            match &hooker {
+                Some(hooker_ref) => MessagingService::new(
+                    config,
+                    Arc::clone(&pool),
+                    Arc::clone(&backend),
+                    hooker_ref.clone(),
+                )
                 .await
-                .ok()
+                .ok(),
+                None => None, // Handle the case where no hooker is provided
+            }
         } else {
             None
         };
@@ -508,22 +516,17 @@ fn filter_events_by_params(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hooker::DefaultKatanaHooker;
     use katana_executor::implementation::noop::NoopExecutorFactory;
     use katana_provider::traits::block::BlockNumberProvider;
-    use std::sync::Arc;
-    use tokio::sync::RwLock;
     #[tokio::test]
     async fn init_interval_block_producer_with_correct_block_env() {
         let executor_factory = NoopExecutorFactory::default();
-        let hooker = DefaultKatanaHooker::<NoopExecutorFactory>::new();
-        let hooker_arc = Arc::new(RwLock::new(hooker));
 
         let sequencer = KatanaSequencer::new(
             executor_factory,
             SequencerConfig { no_mining: true, ..Default::default() },
             StarknetConfig::default(),
-            hooker_arc, // Pass the hooker instance here
+            None, // Pass the hooker instance here
         )
         .await
         .unwrap();
