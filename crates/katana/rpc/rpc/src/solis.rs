@@ -1,6 +1,7 @@
 use base64::decode;
 use std::sync::Arc;
 
+use crate::config::ServerConfig;
 use jsonrpsee::core::{async_trait, Error};
 use katana_core::hooker::HookerAddresses;
 use katana_core::sequencer::KatanaSequencer;
@@ -14,8 +15,12 @@ pub struct SolisApi<EF: ExecutorFactory> {
 }
 
 impl<EF: ExecutorFactory> SolisApi<EF> {
-    pub fn new(sequencer: Arc<KatanaSequencer<EF>>) -> Self {
-        Self { sequencer, rpc_user: "".to_string(), rpc_password: "".to_string() }
+    pub fn new(sequencer: Arc<KatanaSequencer<EF>>, config: &ServerConfig) -> Self {
+        Self {
+            sequencer,
+            rpc_user: config.rpc_user.clone(),
+            rpc_password: config.rpc_password.clone(),
+        }
     }
 
     fn verify_basic_auth(&self, encoded_credentials: &str) -> bool {

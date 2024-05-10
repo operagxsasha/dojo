@@ -5,9 +5,9 @@ pub mod dev;
 pub mod katana;
 pub mod metrics;
 pub mod saya;
+pub mod solis;
 pub mod starknet;
 pub mod torii;
-pub mod solis;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -34,9 +34,9 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use crate::dev::DevApi;
 use crate::katana::KatanaApi;
 use crate::saya::SayaApi;
+use crate::solis::SolisApi;
 use crate::starknet::StarknetApi;
 use crate::torii::ToriiApi;
-use crate::solis::SolisApi;
 
 pub async fn spawn<EF: ExecutorFactory>(
     sequencer: Arc<KatanaSequencer<EF>>,
@@ -63,7 +63,7 @@ pub async fn spawn<EF: ExecutorFactory>(
                 methods.merge(SayaApi::new(sequencer.clone()).into_rpc())?;
             }
             ApiKind::Solis => {
-                methods.merge(SolisApi::new(sequencer.clone()).into_rpc())?;
+                methods.merge(SolisApi::new(sequencer.clone(), &config).into_rpc())?;
             }
         }
     }
