@@ -1,0 +1,43 @@
+[package]
+description = "Modified katana to match ArkProject requirement."
+edition.workspace = true
+license-file.workspace = true
+name = "solis"
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+alloy-primitives.workspace = true
+anyhow.workspace = true
+cfg-if = "1.0.0"
+clap.workspace = true
+clap_complete.workspace = true
+common.workspace = true
+console.workspace = true
+dojo-metrics.workspace = true
+katana-core.workspace = true
+katana-executor.workspace = true
+katana-primitives.workspace = true
+katana-rpc-api.workspace = true
+katana-rpc.workspace = true
+serde_json.workspace = true
+shellexpand = "3.1.0"
+starknet_api.workspace = true
+tokio.workspace = true
+tracing-subscriber.workspace = true
+tracing.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+assert_matches = "1.5.0"
+
+[features]
+default = [ "blockifier", "jemalloc", "messaging" ]
+
+blockifier = [ "katana-executor/blockifier" ]
+# Disable until SIR support Cairo 2.6.3
+#sir = [ "katana-executor/sir" ]
+
+jemalloc = [ "dojo-metrics/jemalloc" ]
+messaging = [ "katana-core/messaging" ]
+starknet-messaging = [ "katana-core/starknet-messaging", "messaging" ]

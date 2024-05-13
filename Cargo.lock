@@ -11310,6 +11310,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "solis"
+version = "0.7.0-alpha.1"
+dependencies = [
+ "alloy-primitives",
+ "anyhow",
+ "assert_matches",
+ "cfg-if",
+ "clap",
+ "clap_complete",
+ "common",
+ "console",
+ "dojo-metrics",
+ "katana-core",
+ "katana-executor",
+ "katana-primitives",
+ "katana-rpc",
+ "katana-rpc-api",
+ "serde_json",
+ "shellexpand",
+ "starknet_api",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
 name = "sozo"
 version = "0.7.0-alpha.1"
 dependencies = [
