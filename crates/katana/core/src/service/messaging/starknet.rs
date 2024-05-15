@@ -15,7 +15,7 @@ use starknet::signers::{LocalWallet, SigningKey};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock as AsyncRwLock;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 use url::Url;
 
 use super::{Error, MessagingConfig, Messenger, MessengerResult, LOG_TARGET};
@@ -55,6 +55,8 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
         let chain_id = provider.chain_id().await?;
         let sender_account_address = FieldElement::from_hex_be(&config.sender_address)?;
         let messaging_contract_address = FieldElement::from_hex_be(&config.contract_address)?;
+
+        info!(target: LOG_TARGET, "StarknetMessaging instance created.");
 
         Ok(StarknetMessaging {
             wallet,
@@ -131,16 +133,17 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
         let estimated_fee = (execution.estimate_fee().await?.overall_fee) * 10u64.into();
         let execution_with_fee = execution.max_fee(estimated_fee);
 
-        // We need logs to debug the starknet transactions.
+        info!(target: LOG_TARGET, "Sending invoke transaction.");
+
         match execution_with_fee.send().await {
             Ok(tx) => {
-                tracing::info!("Transaction successful: {:?}", tx);
+                info!(target: LOG_TARGET, "Transaction successful: {:?}", tx);
                 println!("tx: {:?}", tx);
                 println!("tx_hash: {:?}", tx.transaction_hash);
                 Ok(tx.transaction_hash)
             }
             Err(e) => {
-                error!("Error sending transaction: {:?}", e);
+                error!(target: LOG_TARGET, "Error sending transaction: {:?}", e);
                 Err(e.into())
             }
         }
@@ -151,6 +154,7 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
         hashes.retain(|&x| x != HASH_EXEC);
 
         if hashes.is_empty() {
+            info!(target: LOG_TARGET, "No hashes to send.");
             return Ok(FieldElement::ZERO);
         }
 
@@ -162,6 +166,8 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
             to: self.messaging_contract_address,
             calldata,
         };
+
+        info!(target: LOG_TARGET, "Sending hashes to Starknet.");
 
         match self.send_invoke_tx(vec![call]).await {
             Ok(tx_hash) => {
@@ -189,11 +195,10 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> Messenger for StarknetM
     ) -> MessengerResult<(u64, Vec<Self::MessageTransaction>)> {
         let chain_latest_block: u64 = match self.provider.block_number().await {
             Ok(n) => n,
-            Err(_) => {
+            Err(e) => {
                 warn!(
                     target: LOG_TARGET,
-                    "Couldn't fetch settlement chain last block number. \nSkipped, retry at the \
-                     next tick."
+                    "Couldn't fetch settlement chain last block number. Skipped, retry at the next tick. Error: {:?}", e
                 );
                 return Err(Error::SendError);
             }
@@ -213,10 +218,15 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> Messenger for StarknetM
 
         let mut l1_handler_txs: Vec<L1HandlerTx> = vec![];
 
+        info!(target: LOG_TARGET, "Gathering messages from block {} to block {}", from_block, to_block);
+
         let block_to_events = self
             .fetch_events(BlockId::Number(from_block), BlockId::Number(to_block))
             .await
-            .map_err(|_| Error::SendError)?;
+            .map_err(|e| {
+                error!(target: LOG_TARGET, "Error fetching events: {:?}", e);
+                Error::SendError
+            })?;
 
         for (block_number, block_events) in block_to_events.iter() {
             debug!(
@@ -252,6 +262,7 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> Messenger for StarknetM
         messages: &[MessageToL1],
     ) -> MessengerResult<Vec<<Self as Messenger>::MessageHash>> {
         if messages.is_empty() {
+            info!(target: LOG_TARGET, "No messages to send.");
             return Ok(vec![]);
         }
 
@@ -259,11 +270,13 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> Messenger for StarknetM
 
         for call in &calls {
             if !self.hooker.read().await.verify_tx_for_starknet(call.clone()).await {
+                warn!(target: LOG_TARGET, "Call verification failed for call: {:?}", call);
                 continue;
             }
         }
 
         if !calls.is_empty() {
+            info!(target: LOG_TARGET, "Sending invoke transactions for calls.");
             match self.send_invoke_tx(calls.clone()).await {
                 Ok(tx_hash) => {
                     trace!(target: LOG_TARGET, tx_hash = %format!("{:#064x}", tx_hash), "Invoke transaction hash.");
@@ -305,6 +318,7 @@ fn parse_messages(messages: &[MessageToL1]) -> MessengerResult<(Vec<FieldElement
                     "Message execution is expecting a payload of at least length \
                      2. With [0] being the contract address, and [1] the selector.",
                 );
+                continue;
             }
 
             let to = m.payload[0];
@@ -319,10 +333,10 @@ fn parse_messages(messages: &[MessageToL1]) -> MessengerResult<(Vec<FieldElement
             calls.push(Call { to, selector, calldata });
             hashes.push(HASH_EXEC);
         } else if magic == MSG_MAGIC {
-            // In the case or regular message, we compute the message's hash
+            // In the case of a regular message, we compute the message's hash
             // which will then be sent in a transaction to be registered.
 
-            // As to_address is used by the magic, the `to_address` we want
+            // As `to_address` is used by the magic, the `to_address` we want
             // is the first element of the payload.
             let to_address = m.payload[0];
 
@@ -340,7 +354,7 @@ fn parse_messages(messages: &[MessageToL1]) -> MessengerResult<(Vec<FieldElement
 
             hashes.push(starknet_keccak(&buf));
         } else {
-            // Skip the message if no valid magic number found.
+            // Skip the message if no valid magic number is found.
             warn!(target: LOG_TARGET, magic = ?magic, "Invalid message to_address magic value.");
             continue;
         }
@@ -363,7 +377,7 @@ fn l1_handler_tx_from_event(event: &EmittedEvent, chain_id: ChainId) -> Result<L
         error!(target: LOG_TARGET, "Event MessageSentToAppchain is not well formatted.");
     }
 
-    // See contrat appchain_messaging.cairo for MessageSentToAppchain event.
+    // See contract appchain_messaging.cairo for MessageSentToAppchain event.
     let from_address = event.keys[2];
     let to_address = event.keys[3];
     let entry_point_selector = event.data[0];
@@ -402,7 +416,7 @@ fn info_from_event(event: &EmittedEvent) -> Result<(FieldElement, FieldElement, 
         error!(target: LOG_TARGET, "Event MessageSentToAppchain is not well formatted");
     }
 
-    // See contrat appchain_messaging.cairo for MessageSentToAppchain event.
+    // See contract appchain_messaging.cairo for MessageSentToAppchain event.
     let from_address = event.keys[2];
     let to_address = event.keys[3];
     let entry_point_selector = event.data[0];

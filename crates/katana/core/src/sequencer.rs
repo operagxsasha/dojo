@@ -27,6 +27,7 @@ use katana_provider::traits::transaction::{
     ReceiptProvider, TransactionProvider, TransactionsProviderExt,
 };
 use starknet::core::types::{BlockTag, EmittedEvent, EventsPage};
+use tracing::error;
 
 use crate::backend::config::StarknetConfig;
 use crate::backend::contract::StarknetContract;
@@ -92,7 +93,10 @@ impl<EF: ExecutorFactory> KatanaSequencer<EF> {
                 )
                 .await
                 .ok(),
-                None => None, // Handle the case where no hooker is provided
+                None => {
+                    error!("Messaging service is enabled but no hooker is provided. Messaging service will not be started.");
+                    None
+                }
             }
         } else {
             None

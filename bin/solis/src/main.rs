@@ -8,6 +8,7 @@ use console::Style;
 use dojo_metrics::{metrics_process, prometheus_exporter};
 use katana_core::constants::MAX_RECURSION_DEPTH;
 use katana_core::env::get_default_vm_resource_fee_cost;
+use katana_core::hooker::{DefaultKatanaHooker, KatanaHooker};
 use katana_core::sequencer::KatanaSequencer;
 use katana_executor::SimulationFlag;
 use katana_primitives::class::ClassHash;
@@ -17,6 +18,7 @@ use katana_primitives::genesis::allocation::GenesisAccountAlloc;
 use katana_primitives::genesis::Genesis;
 use katana_rpc::{spawn, NodeHandle};
 use tokio::signal::ctrl_c;
+use tokio::sync::RwLock as AsyncRwLock;
 use tracing::info;
 
 mod args;
@@ -93,8 +95,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     }
 
+    // Create a default hooker instance
+    // Create a default hooker instance
+    // Create a default hooker instance
+    let hooker: Arc<AsyncRwLock<dyn KatanaHooker<BlockifierFactory> + Send + Sync>> =
+        Arc::new(AsyncRwLock::new(DefaultKatanaHooker::new()));
+
     let sequencer = Arc::new(
-        KatanaSequencer::new(executor_factory, sequencer_config, starknet_config, None).await?,
+        KatanaSequencer::new(executor_factory, sequencer_config, starknet_config, Some(hooker))
+            .await?,
     );
     let NodeHandle { addr, handle, .. } = spawn(Arc::clone(&sequencer), server_config).await?;
 
