@@ -1,13 +1,12 @@
 //! This module contains a hooker trait, that is added to katana in order to
 //! allow external code to react at some precise moment of katana processing.
-use std::sync::Arc;
 
+use crate::sequencer::KatanaSequencer;
 use async_trait::async_trait;
 use katana_executor::ExecutorFactory;
 use starknet::accounts::Call;
 use starknet::core::types::{BroadcastedInvokeTransaction, FieldElement};
-
-use crate::sequencer::KatanaSequencer;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, Copy, PartialEq, Eq)]
 pub struct HookerAddresses {
@@ -16,12 +15,12 @@ pub struct HookerAddresses {
 }
 
 #[async_trait]
-pub trait KatanaHooker<EF: katana_executor::ExecutorFactory> {
+pub trait KatanaHooker<EF: ExecutorFactory> {
     /// Sets a reference to the underlying sequencer.
     fn set_sequencer(&mut self, sequencer: Arc<KatanaSequencer<EF>>);
 
     /// Runs code right before a message from the L1 is converted
-    /// into a `L1HandlerTransaction`. This hook is usefull to
+    /// into a `L1HandlerTransaction`. This hook is useful to
     /// apply conditions on the message being captured.
     ///
     /// # Arguments
@@ -75,7 +74,6 @@ pub trait KatanaHooker<EF: katana_executor::ExecutorFactory> {
     fn set_addresses(&mut self, addresses: HookerAddresses);
 }
 
-#[derive()]
 pub struct DefaultKatanaHooker<EF: ExecutorFactory> {
     sequencer: Option<Arc<KatanaSequencer<EF>>>,
     addresses: Option<HookerAddresses>,
@@ -83,13 +81,7 @@ pub struct DefaultKatanaHooker<EF: ExecutorFactory> {
 
 impl<EF: ExecutorFactory> DefaultKatanaHooker<EF> {
     pub fn new() -> Self {
-        DefaultKatanaHooker {
-            sequencer: None,
-            addresses: None,
-        }
-    }
-    pub fn set_sequencer(&mut self, sequencer: Arc<KatanaSequencer<EF>>) {
-        self.sequencer = Some(sequencer);
+        DefaultKatanaHooker { sequencer: None, addresses: None }
     }
 }
 
@@ -121,7 +113,7 @@ impl<EF: ExecutorFactory + 'static + Send + Sync> KatanaHooker<EF> for DefaultKa
 
     async fn on_starknet_tx_failed(&self, _call: Call) {
         // Log the failure or handle it according to your needs. No-op by default.
-        print!("Starknet transaction failed: {:?}", _call);
+        tracing::error!("Starknet transaction failed: {:?}", _call);
     }
 
     fn set_addresses(&mut self, addresses: HookerAddresses) {
