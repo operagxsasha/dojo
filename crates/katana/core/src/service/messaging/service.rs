@@ -29,7 +29,7 @@ pub struct MessagingService<EF: ExecutorFactory> {
     backend: Arc<Backend<EF>>,
     pool: Arc<TransactionPool>,
     /// The messenger mode the service is running in.
-    messenger: Arc<MessengerMode>,
+    messenger: Arc<MessengerMode<EF>>,
     /// The block number of the settlement chain from which messages will be gathered.
     gather_from_block: u64,
     /// The message gathering future.
@@ -56,7 +56,7 @@ impl<EF: ExecutorFactory> MessagingService<EF> {
             Err(_) => {
                 panic!(
                     "Messaging could not be initialized.\nVerify that the messaging target node \
-                     (anvil or other katana) is running.\n",
+                     (anvil or other katana) is running.\n"
                 )
             }
         };
@@ -74,12 +74,12 @@ impl<EF: ExecutorFactory> MessagingService<EF> {
     }
 
     async fn gather_messages(
-        messenger: Arc<MessengerMode>,
+        messenger: Arc<MessengerMode<EF>>,
         pool: Arc<TransactionPool>,
         backend: Arc<Backend<EF>>,
         from_block: u64,
     ) -> MessengerResult<(u64, usize)> {
-        // 200 avoids any possible rejection from RPC with possibly lot's of messages.
+        // 200 avoids any possible rejection from RPC with possibly lots of messages.
         // TODO: May this be configurable?
         let max_block = 200;
 
@@ -98,7 +98,6 @@ impl<EF: ExecutorFactory> MessagingService<EF> {
                 Ok((block_num, txs_count))
             }
 
-            #[cfg(feature = "starknet-messaging")]
             MessengerMode::Starknet(inner) => {
                 let (block_num, txs) =
                     inner.gather_messages(from_block, max_block, backend.chain_id).await?;
@@ -118,7 +117,7 @@ impl<EF: ExecutorFactory> MessagingService<EF> {
     async fn send_messages(
         block_num: u64,
         backend: Arc<Backend<EF>>,
-        messenger: Arc<MessengerMode>,
+        messenger: Arc<MessengerMode<EF>>,
     ) -> MessengerResult<Option<(u64, usize)>> {
         let Some(messages) = ReceiptProvider::receipts_by_block(
             backend.blockchain.provider(),
@@ -141,7 +140,6 @@ impl<EF: ExecutorFactory> MessagingService<EF> {
                     Ok(Some((block_num, hashes.len())))
                 }
 
-                #[cfg(feature = "starknet-messaging")]
                 MessengerMode::Starknet(inner) => {
                     let hashes = inner.send_messages(&messages).await.map(|hashes| {
                         hashes.iter().map(|h| format!("{h:#x}")).collect::<Vec<_>>()
@@ -259,7 +257,6 @@ fn interval_from_seconds(secs: u64) -> Interval {
 fn trace_msg_to_l1_sent(messages: &[MessageToL1], hashes: &[String]) {
     assert_eq!(messages.len(), hashes.len());
 
-    #[cfg(feature = "starknet-messaging")]
     let hash_exec_str = format!("{:#064x}", super::starknet::HASH_EXEC);
 
     for (i, m) in messages.iter().enumerate() {
@@ -267,7 +264,6 @@ fn trace_msg_to_l1_sent(messages: &[MessageToL1], hashes: &[String]) {
 
         let hash = &hashes[i];
 
-        #[cfg(feature = "starknet-messaging")]
         if hash == &hash_exec_str {
             let to_address = &payload_str[0];
             let selector = &payload_str[1];

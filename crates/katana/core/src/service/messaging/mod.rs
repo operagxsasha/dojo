@@ -38,7 +38,6 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 mod ethereum;
 mod service;
-#[cfg(feature = "starknet-messaging")]
 mod starknet;
 
 use std::path::Path;
@@ -54,12 +53,10 @@ use serde::Deserialize;
 use tracing::{error, info};
 
 pub use self::service::{MessagingOutcome, MessagingService};
-#[cfg(feature = "starknet-messaging")]
 use self::starknet::StarknetMessaging;
 
 pub(crate) const LOG_TARGET: &str = "messaging";
 pub(crate) const CONFIG_CHAIN_ETHEREUM: &str = "ethereum";
-#[cfg(feature = "starknet-messaging")]
 pub(crate) const CONFIG_CHAIN_STARKNET: &str = "starknet";
 
 type MessengerResult<T> = Result<T, Error>;
@@ -166,16 +163,15 @@ pub trait Messenger {
     ) -> MessengerResult<Vec<Self::MessageHash>>;
 }
 
-pub enum MessengerMode {
+pub enum MessengerMode<EF: katana_executor::ExecutorFactory + Send + Sync> {
     Ethereum(EthereumMessaging),
-    #[cfg(feature = "starknet-messaging")]
-    Starknet(StarknetMessaging),
+    Starknet(StarknetMessaging<EF>),
 }
 
-impl MessengerMode {
-    pub async fn from_config<EF: katana_executor::ExecutorFactory>(
+impl<EF: katana_executor::ExecutorFactory + Send + Sync> MessengerMode<EF> {
+    pub async fn from_config(
         config: MessagingConfig,
-        hooker: Arc<AsyncRwLock<dyn KatanaHooker<EF>>>,
+        hooker: Arc<AsyncRwLock<dyn KatanaHooker<EF> + Send + Sync>>,
     ) -> MessengerResult<Self> {
         match config.chain.as_str() {
             CONFIG_CHAIN_ETHEREUM => match EthereumMessaging::new(config).await {
@@ -189,8 +185,7 @@ impl MessengerMode {
                 }
             },
 
-            #[cfg(feature = "starknet-messaging")]
-            CONFIG_CHAIN_STARKNET => match StarknetMessaging::new(config).await {
+            CONFIG_CHAIN_STARKNET => match StarknetMessaging::new(config, hooker).await {
                 Ok(m_sn) => {
                     info!(target: LOG_TARGET, "Messaging enabled [Starknet].");
                     Ok(MessengerMode::Starknet(m_sn))

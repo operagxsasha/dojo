@@ -1,8 +1,6 @@
-use futures::channel::mpsc::Receiver;
-use jsonrpsee::core::{async_trait, Error as RpcError};
+use jsonrpsee::core::Error as RpcError;
 use jsonrpsee::types::error::CallError;
 use jsonrpsee::types::ErrorObject;
-use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

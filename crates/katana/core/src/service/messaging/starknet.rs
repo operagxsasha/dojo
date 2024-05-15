@@ -1,9 +1,4 @@
 use crate::hooker::KatanaHooker;
-use tokio::sync::RwLock as AsyncRwLock;
-
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use anyhow::Result;
 use async_trait::async_trait;
 use katana_primitives::chain::ChainId;
@@ -17,6 +12,9 @@ use starknet::macros::{felt, selector};
 use starknet::providers::jsonrpc::HttpTransport;
 use starknet::providers::{AnyProvider, JsonRpcClient, Provider};
 use starknet::signers::{LocalWallet, SigningKey};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock as AsyncRwLock;
 use tracing::{debug, error, trace, warn};
 use url::Url;
 
@@ -32,7 +30,7 @@ const EXE_MAGIC: FieldElement = felt!("0x455845");
 
 pub const HASH_EXEC: FieldElement = felt!("0xee");
 
-pub struct StarknetMessaging<EF: katana_executor::ExecutorFactory> {
+pub struct StarknetMessaging<EF: katana_executor::ExecutorFactory + Send + Sync> {
     chain_id: FieldElement,
     provider: AnyProvider,
     wallet: LocalWallet,
@@ -41,11 +39,11 @@ pub struct StarknetMessaging<EF: katana_executor::ExecutorFactory> {
     hooker: Arc<AsyncRwLock<dyn KatanaHooker<EF> + Send + Sync>>,
 }
 
-impl<EF: katana_executor::ExecutorFactory> StarknetMessaging {
+impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
     pub async fn new(
         config: MessagingConfig,
         hooker: Arc<AsyncRwLock<dyn KatanaHooker<EF> + Send + Sync>>,
-    ) -> Result<StarknetMessaging> {
+    ) -> Result<StarknetMessaging<EF>> {
         let provider = AnyProvider::JsonRpcHttp(JsonRpcClient::new(HttpTransport::new(
             Url::parse(&config.rpc_url)?,
         )));
@@ -131,12 +129,12 @@ impl<EF: katana_executor::ExecutorFactory> StarknetMessaging {
         // TODO: we need to have maximum fee configurable.
         let execution = account.execute(calls).fee_estimate_multiplier(10f64);
         let estimated_fee = (execution.estimate_fee().await?.overall_fee) * 10u64.into();
-        let tx = execution.max_fee(estimated_fee).send().await?;
+        let execution_with_fee = execution.max_fee(estimated_fee);
 
         // We need logs to debug the starknet transactions.
-        match execution.send().await {
+        match execution_with_fee.send().await {
             Ok(tx) => {
-                info!("Transaction successful: {:?}", tx);
+                tracing::info!("Transaction successful: {:?}", tx);
                 println!("tx: {:?}", tx);
                 println!("tx_hash: {:?}", tx.transaction_hash);
                 Ok(tx.transaction_hash)
@@ -179,7 +177,7 @@ impl<EF: katana_executor::ExecutorFactory> StarknetMessaging {
 }
 
 #[async_trait]
-impl Messenger for StarknetMessaging {
+impl<EF: katana_executor::ExecutorFactory + Send + Sync> Messenger for StarknetMessaging<EF> {
     type MessageHash = FieldElement;
     type MessageTransaction = L1HandlerTx;
 
@@ -215,36 +213,36 @@ impl Messenger for StarknetMessaging {
 
         let mut l1_handler_txs: Vec<L1HandlerTx> = vec![];
 
-        self.fetch_events(BlockId::Number(from_block), BlockId::Number(to_block))
+        let block_to_events = self
+            .fetch_events(BlockId::Number(from_block), BlockId::Number(to_block))
             .await
-            .map_err(|_| Error::SendError)
-            .unwrap()
-            .iter()
-            .for_each(|(block_number, block_events)| {
-                debug!(
-                    target: LOG_TARGET,
-                    block_number = %block_number,
-                    events_count = %block_events.len(),
-                    "Converting events of block into L1HandlerTx."
-                );
+            .map_err(|_| Error::SendError)?;
 
-                block_events.iter().for_each(|e| {
-                    if let Ok(tx) = l1_handler_tx_from_event(e, chain_id) {
-                        if let Ok((from, to, selector)) = info_from_event(e) {
-                            let is_message_accepted = self
-                                .hooker
-                                .read()
-                                .await
-                                .verify_message_to_appchain(from, to, selector)
-                                .await;
+        for (block_number, block_events) in block_to_events.iter() {
+            debug!(
+                target: LOG_TARGET,
+                block_number = %block_number,
+                events_count = %block_events.len(),
+                "Converting events of block into L1HandlerTx."
+            );
 
-                            if is_message_accepted {
-                                l1_handler_txs.push(tx)
-                            }
+            for event in block_events.iter() {
+                if let Ok(tx) = l1_handler_tx_from_event(event, chain_id) {
+                    if let Ok((from, to, selector)) = info_from_event(event) {
+                        let hooker = Arc::clone(&self.hooker);
+                        let is_message_accepted = hooker
+                            .read()
+                            .await
+                            .verify_message_to_appchain(from, to, selector)
+                            .await;
+
+                        if is_message_accepted {
+                            l1_handler_txs.push(tx);
                         }
                     }
-                })
-            });
+                }
+            }
+        }
 
         Ok((to_block, l1_handler_txs))
     }
@@ -252,7 +250,7 @@ impl Messenger for StarknetMessaging {
     async fn send_messages(
         &self,
         messages: &[MessageToL1],
-    ) -> MessengerResult<Vec<Self::MessageHash>> {
+    ) -> MessengerResult<Vec<<Self as Messenger>::MessageHash>> {
         if messages.is_empty() {
             return Ok(vec![]);
         }
@@ -263,19 +261,23 @@ impl Messenger for StarknetMessaging {
             if !self.hooker.read().await.verify_tx_for_starknet(call.clone()).await {
                 continue;
             }
-            if !calls.is_empty() {
-                match self.send_invoke_tx(calls).await {
-                    Ok(tx_hash) => {
-                        trace!(target: LOG_TARGET, tx_hash = %format!("{:#064x}", tx_hash), "Invoke transaction hash.");
-                    }
-                    Err(e) => {
-                        error!(target: LOG_TARGET, error = %e, "Sending invoke tx on Starknet.");
-                        self.hooker.read().await.on_starknet_tx_failed(call.clone()).await;
-                        return Err(Error::SendError);
-                    }
-                };
-            }
         }
+
+        if !calls.is_empty() {
+            match self.send_invoke_tx(calls.clone()).await {
+                Ok(tx_hash) => {
+                    trace!(target: LOG_TARGET, tx_hash = %format!("{:#064x}", tx_hash), "Invoke transaction hash.");
+                }
+                Err(e) => {
+                    error!(target: LOG_TARGET, error = %e, "Sending invoke tx on Starknet.");
+                    for call in calls {
+                        self.hooker.read().await.on_starknet_tx_failed(call).await;
+                    }
+                    return Err(Error::SendError);
+                }
+            };
+        }
+
         self.send_hashes(hashes.clone()).await?;
 
         Ok(hashes)
