@@ -7,6 +7,7 @@ use katana_executor::ExecutorFactory;
 use starknet::accounts::Call;
 use starknet::core::types::{BroadcastedInvokeTransaction, FieldElement};
 use std::sync::Arc;
+use tracing::{error, info};
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, Copy, PartialEq, Eq)]
 pub struct HookerAddresses {
@@ -89,34 +90,42 @@ impl<EF: ExecutorFactory> DefaultKatanaHooker<EF> {
 impl<EF: ExecutorFactory + 'static + Send + Sync> KatanaHooker<EF> for DefaultKatanaHooker<EF> {
     fn set_sequencer(&mut self, sequencer: Arc<KatanaSequencer<EF>>) {
         self.sequencer = Some(sequencer);
+        info!("HOOKER: Sequencer set for hooker");
     }
 
     async fn verify_message_to_appchain(
         &self,
-        _from: FieldElement,
-        _to: FieldElement,
-        _selector: FieldElement,
+        from: FieldElement,
+        to: FieldElement,
+        selector: FieldElement,
     ) -> bool {
+        info!(
+            "HOOKER: verify_message_to_appchain called with from: {:?}, to: {:?}, selector: {:?}",
+            from, to, selector
+        );
         true
     }
 
     async fn verify_invoke_tx_before_pool(
         &self,
-        _transaction: BroadcastedInvokeTransaction,
+        transaction: BroadcastedInvokeTransaction,
     ) -> bool {
+        info!("HOOKER: verify_invoke_tx_before_pool called with transaction: {:?}", transaction);
         true
     }
 
-    async fn verify_tx_for_starknet(&self, _call: Call) -> bool {
+    async fn verify_tx_for_starknet(&self, call: Call) -> bool {
+        info!("HOOKER: verify_tx_for_starknet called with call: {:?}", call);
         true
     }
 
-    async fn on_starknet_tx_failed(&self, _call: Call) {
+    async fn on_starknet_tx_failed(&self, call: Call) {
         // Log the failure or handle it according to your needs. No-op by default.
-        tracing::error!("Starknet transaction failed: {:?}", _call);
+        error!("HOOKER: Starknet transaction failed: {:?}", call);
     }
 
     fn set_addresses(&mut self, addresses: HookerAddresses) {
         self.addresses = Some(addresses);
+        info!("HOOKER: Addresses set for hooker: {:?}", addresses);
     }
 }
