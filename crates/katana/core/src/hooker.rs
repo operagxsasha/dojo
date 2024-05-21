@@ -5,7 +5,7 @@ use crate::sequencer::KatanaSequencer;
 use async_trait::async_trait;
 use katana_executor::ExecutorFactory;
 use starknet::accounts::Call;
-use starknet::core::types::{BroadcastedInvokeTransaction, FieldElement};
+use starknet::core::types::{BroadcastedInvokeTransactionV3, FieldElement};
 use std::sync::Arc;
 use tracing::{error, info};
 
@@ -44,7 +44,7 @@ pub trait KatanaHooker<EF: ExecutorFactory> {
     /// # Arguments
     ///
     /// * `transaction` - The invoke transaction to be verified.
-    async fn verify_invoke_tx_before_pool(&self, transaction: BroadcastedInvokeTransaction)
+    async fn verify_invoke_tx_before_pool(&self, transaction: BroadcastedInvokeTransactionV3)
         -> bool;
 
     /// Runs code right before a message to starknet
@@ -108,7 +108,7 @@ impl<EF: ExecutorFactory + 'static + Send + Sync> KatanaHooker<EF> for DefaultKa
 
     async fn verify_invoke_tx_before_pool(
         &self,
-        transaction: BroadcastedInvokeTransaction,
+        transaction: BroadcastedInvokeTransactionV3,
     ) -> bool {
         info!("HOOKER: verify_invoke_tx_before_pool called with transaction: {:?}", transaction);
         true
