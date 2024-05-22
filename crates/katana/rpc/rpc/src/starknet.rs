@@ -36,7 +36,7 @@ use katana_rpc_types::{
 use katana_rpc_types_builder::ReceiptBuilder;
 use katana_tasks::{BlockingTaskPool, TokioTaskSpawner};
 use starknet::core::types::{
-    BlockTag, DeclareTransactionTrace, DeployAccountTransactionTrace, ExecuteInvocation,
+    BlockTag, BroadcastedInvokeTransaction, DeclareTransactionTrace, DeployAccountTransactionTrace, ExecuteInvocation,
     InvokeTransactionTrace, L1HandlerTransactionTrace, RevertedInvocation, SimulatedTransaction,
     TransactionExecutionStatus, TransactionStatus, TransactionTrace,
 };
@@ -675,6 +675,20 @@ impl<EF: ExecutorFactory> StarknetApiServer for StarknetApi<EF> {
         &self,
         invoke_transaction: BroadcastedInvokeTx,
     ) -> RpcResult<InvokeTxResult> {
+
+        if let Some(hooker) = &self.inner.sequencer.hooker {
+            let tx_clone = invoke_transaction.0.clone();
+            match tx_clone {
+                BroadcastedInvokeTransaction::V3(tx) => {
+                    if !hooker.read().await.verify_invoke_tx_before_pool(tx).await {
+                       return Err(StarknetApiError::SolisAssetFault.into());
+                    }
+                },
+                BroadcastedInvokeTransaction::V1(_tx) => {
+                    return Err(StarknetApiError::UnsupportedTransactionVersion.into());
+                }
+            }
+        }
         self.on_io_blocking_task(move |this| {
             if invoke_transaction.is_query() {
                 return Err(StarknetApiError::UnsupportedTransactionVersion.into());
