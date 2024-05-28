@@ -102,9 +102,10 @@ impl<EF: ExecutorFactory> MessagingService<EF> {
                 let (block_num, txs) =
                     inner.gather_messages(from_block, max_block, backend.chain_id).await?;
                 let txs_count = txs.len();
-
+                info!(target: LOG_TARGET, "Gathered {} transactions for Starknet mode.", txs_count);
                 txs.into_iter().for_each(|tx| {
                     let hash = tx.calculate_hash();
+                    info!(target: LOG_TARGET, "Processing transaction with hash: {:#x}", hash);
                     trace_l1_handler_tx_exec(hash, &tx);
                     pool.add_transaction(ExecutableTxWithHash { hash, transaction: tx.into() })
                 });

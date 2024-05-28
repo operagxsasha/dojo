@@ -70,6 +70,8 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
         let mut continuation_token: Option<String> = None;
 
         loop {
+            debug!(target: LOG_TARGET, "Fetching pending events with continuation token: {:?}", continuation_token);
+
             let filter = EventFilter {
                 from_block: Some(BlockId::Tag(BlockTag::Pending)),
                 to_block: Some(BlockId::Tag(BlockTag::Pending)),
@@ -86,11 +88,15 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
                     Error::SendError
                 })?;
 
+            debug!(target: LOG_TARGET, "Fetched {} events", event_page.events.len());
+
             for event in event_page.events {
-                let event_id = event.transaction_hash.to_string(); // Assuming `transaction_hash` is the unique identifier for the event
+                let event_id = event.transaction_hash.to_string();
+                debug!(target: LOG_TARGET, "Processing event with ID: {}", event_id);
 
                 let mut cache = self.event_cache.write().await;
                 if cache.contains(&event_id) {
+                    debug!(target: LOG_TARGET, "Event ID: {} already processed, skipping", event_id);
                     continue;
                 }
 
@@ -104,8 +110,11 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
                             .await;
 
                         if is_message_accepted {
+                            debug!(target: LOG_TARGET, "Event ID: {} accepted, adding to transactions", event_id);
                             l1_handler_txs.push(tx);
                             cache.insert(event_id);
+                        } else {
+                            debug!(target: LOG_TARGET, "Event ID: {} not accepted by hooker", event_id);
                         }
                     }
                 }
@@ -118,6 +127,7 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
             }
         }
 
+        debug!(target: LOG_TARGET, "Total transactions gathered: {}", l1_handler_txs.len());
         Ok(l1_handler_txs)
     }
 
@@ -195,8 +205,13 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> Messenger for StarknetM
         max_blocks: u64,
         chain_id: ChainId,
     ) -> MessengerResult<(u64, Vec<L1HandlerTx>)> {
+        debug!(target: LOG_TARGET, "Gathering messages from block: {} with max blocks: {}", from_block, max_blocks);
+
         let chain_latest_block: u64 = match self.provider.block_number().await {
-            Ok(n) => n,
+            Ok(n) => {
+                debug!(target: LOG_TARGET, "Latest block number on chain: {}", n);
+                n
+            }
             Err(e) => {
                 warn!(
                     target: LOG_TARGET,
@@ -209,9 +224,11 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> Messenger for StarknetM
         let pending_txs = self.fetch_pending_events(chain_id).await?;
 
         if from_block != chain_latest_block {
+            debug!(target: LOG_TARGET, "Block number changed from {} to {}, clearing cache", from_block, chain_latest_block);
             self.event_cache.write().await.clear();
         }
 
+        debug!(target: LOG_TARGET, "Returning {} pending transactions", pending_txs.len());
         Ok((chain_latest_block, pending_txs))
     }
 
