@@ -260,12 +260,20 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> Messenger for StarknetM
     type MessageHash = FieldElement;
     type MessageTransaction = L1HandlerTx;
 
+    #[async_trait]
+impl<EF: katana_executor::ExecutorFactory + Send + Sync> Messenger for StarknetMessaging<EF> {
+    type MessageHash = FieldElement;
+    type MessageTransaction = L1HandlerTx;
+
     async fn gather_messages(
         &self,
         from_block: u64,
         max_blocks: u64,
         chain_id: ChainId,
     ) -> MessengerResult<(u64, Vec<Self::MessageTransaction>)> {
+        let mut l1_handler_txs: Vec<L1HandlerTx> = vec![];
+
+        // Step 1: Fetch and process confirmed blocks
         let chain_latest_block: u64 = match self.provider.block_number().await {
             Ok(n) => n,
             Err(e) => {
@@ -282,14 +290,11 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> Messenger for StarknetM
             return Ok((chain_latest_block, vec![]));
         }
 
-        // +1 as the from_block counts as 1 block fetched.
         let to_block = if from_block + max_blocks + 1 < chain_latest_block {
             from_block + max_blocks
         } else {
             chain_latest_block
         };
-
-        let mut l1_handler_txs: Vec<L1HandlerTx> = vec![];
 
         info!(target: LOG_TARGET, "Gathering messages from block {} to block {}", from_block, to_block);
 
@@ -320,42 +325,23 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> Messenger for StarknetM
             }
         }
 
-        // Now, handle pending block events
-        {
-            // Use a lock to ensure atomicity
-            let cache_lock = self.cache_lock.write().await;
+        // Step 2: Continuously fetch and process pending block events
+        let mut latest_block_number = chain_latest_block;
+        loop {
+            {
+                // Use a lock to ensure atomicity
+                let cache_lock = self.cache_lock.write().await;
 
-            // Fetch pending block events
-            let pending_events = self.fetch_pending_events(chain_id, 100).await.map_err(|e| {
-                error!(target: LOG_TARGET, "Error fetching pending events: {:?}", e);
-                Error::SendError
-            })?;
-            l1_handler_txs.extend(pending_events);
-
-            // Get the latest block number again to ensure we didn't miss any new blocks
-            let latest_block_number = match self.provider.block_number().await {
-                Ok(n) => n,
-                Err(e) => {
-                    warn!(
-                        target: LOG_TARGET,
-                        "Couldn't fetch settlement chain last block number. Skipped, retry at the next tick. Error: {:?}", e
-                    );
-                    return Err(Error::SendError);
-                }
-            };
-
-            // Fetch all events from the latest block to ensure none are missed
-            let confirmed_events = self.fetch_events(BlockId::Number(latest_block_number), BlockId::Number(latest_block_number)).await.map_err(|e| {
-                error!(target: LOG_TARGET, "Error fetching confirmed block events: {:?}", e);
-                Error::SendError
-            })?;
-            
-            for block_events in confirmed_events.values() {
-                for event in block_events {
+                // Fetch pending block events
+                let pending_events = self.fetch_pending_events(chain_id, 100).await.map_err(|e| {
+                    error!(target: LOG_TARGET, "Error fetching pending events: {:?}", e);
+                    Error::SendError
+                })?;
+                for event in pending_events {
                     let event_id = event.transaction_hash.to_string();
                     if !self.event_cache.is_event_processed(&event_id).await {
-                        if let Ok(tx) = l1_handler_tx_from_event(event, chain_id) {
-                            if let Ok((from, to, selector)) = info_from_event(event) {
+                        if let Ok(tx) = l1_handler_tx_from_event(&event, chain_id) {
+                            if let Ok((from, to, selector)) = info_from_event(&event) {
                                 let hooker = Arc::clone(&self.hooker);
                                 let is_message_accepted = hooker
                                     .read()
@@ -365,27 +351,73 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> Messenger for StarknetM
 
                                 if is_message_accepted {
                                     l1_handler_txs.push(tx);
+                                    self.event_cache.mark_event_as_processed(event_id).await;
                                 }
                             }
                         }
                     }
                 }
+
+                // Check if there is a new confirmed block
+                let current_latest_block = match self.provider.block_number().await {
+                    Ok(n) => n,
+                    Err(e) => {
+                        warn!(
+                            target: LOG_TARGET,
+                            "Couldn't fetch settlement chain last block number. Skipped, retry at the next tick. Error: {:?}", e
+                        );
+                        return Err(Error::SendError);
+                    }
+                };
+
+                if current_latest_block > latest_block_number {
+                    // Clear the event cache
+                    self.event_cache.clear().await;
+
+                    // Fetch and process events from the latest block
+                    let confirmed_events = self.fetch_events(BlockId::Number(current_latest_block), BlockId::Number(current_latest_block)).await.map_err(|e| {
+                        error!(target: LOG_TARGET, "Error fetching confirmed block events: {:?}", e);
+                        Error::SendError
+                    })?;
+                    
+                    for block_events in confirmed_events.values() {
+                        for event in block_events {
+                            let event_id = event.transaction_hash.to_string();
+                            if !self.event_cache.is_event_processed(&event_id).await {
+                                if let Ok(tx) = l1_handler_tx_from_event(event, chain_id) {
+                                    if let Ok((from, to, selector)) = info_from_event(event) {
+                                        let hooker = Arc::clone(&self.hooker);
+                                        let is_message_accepted = hooker
+                                            .read()
+                                            .await
+                                            .verify_message_to_appchain(from, to, selector)
+                                            .await;
+
+                                        if is_message_accepted {
+                                            l1_handler_txs.push(tx);
+                                            self.event_cache.mark_event_as_processed(event_id).await;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    latest_block_number = current_latest_block;
+                }
+
+                drop(cache_lock); // Release the lock
             }
 
-            self.event_cache.clear().await;
-
-            // Fetch pending events again to ensure no events were missed during the cache clearing
-            let rechecked_pending_events = self.fetch_pending_events(chain_id, 100).await.map_err(|e| {
-                error!(target: LOG_TARGET, "Error rechecking pending events: {:?}", e);
-                Error::SendError
-            })?;
-            l1_handler_txs.extend(rechecked_pending_events);
-
-            drop(cache_lock); // Release the lock
+            // Sleep for a second before fetching pending events again
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
         }
 
-        Ok((to_block, l1_handler_txs))
+        // Return the latest processed block and transactions
+        Ok((latest_block_number, l1_handler_txs))
     }
+}
+
 
     async fn send_messages(
         &self,
