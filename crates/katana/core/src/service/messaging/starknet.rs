@@ -13,6 +13,7 @@ use starknet::providers::jsonrpc::HttpTransport;
 use starknet::providers::{AnyProvider, JsonRpcClient, Provider};
 use starknet::signers::{LocalWallet, SigningKey};
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock as AsyncRwLock;
 use tracing::{debug, error, info, trace, warn};
@@ -33,6 +34,7 @@ pub struct StarknetMessaging<EF: katana_executor::ExecutorFactory + Send + Sync>
     messaging_contract_address: FieldElement,
     hooker: Arc<AsyncRwLock<dyn KatanaHooker<EF> + Send + Sync>>,
     event_cache: Arc<AsyncRwLock<HashSet<String>>>,
+    latest_block: Arc<AtomicU64>,
 }
 
 impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
@@ -47,6 +49,7 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
         let private_key = FieldElement::from_hex_be(&config.private_key)?;
         let key = SigningKey::from_secret_scalar(private_key);
         let wallet = LocalWallet::from_signing_key(key);
+        let latest_block = Arc::new(AtomicU64::new(0));
 
         let chain_id = provider.chain_id().await?;
         let sender_account_address = FieldElement::from_hex_be(&config.sender_address)?;
@@ -62,6 +65,7 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
             messaging_contract_address,
             hooker,
             event_cache: Arc::new(AsyncRwLock::new(HashSet::new())),
+            latest_block,
         })
     }
 
@@ -94,14 +98,16 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
                 let event_id = event.transaction_hash.to_string();
                 debug!(target: LOG_TARGET, "Processing event with ID: {}", event_id);
 
-                let mut cache = self.event_cache.write().await;
-                if cache.contains(&event_id) {
-                    debug!(target: LOG_TARGET, "Event ID: {} already processed, skipping", event_id);
-                    continue;
+                {
+                    let cache = self.event_cache.read().await;
+                    if cache.contains(&event_id) {
+                        debug!(target: LOG_TARGET, "Event ID: {} already processed, skipping", event_id);
+                        continue;
+                    }
                 }
 
                 if let Ok(tx) = l1_handler_tx_from_event(&event, chain_id) {
-                    if let Ok((from, to, selector)) = info_from_event(&event) {
+                    // if let Ok((from, to, selector)) = info_from_event(&event) {
                         // let hooker = Arc::clone(&self.hooker);
                         // let is_message_accepted = hooker
                         //     .read()
@@ -111,11 +117,12 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
                         // if is_message_accepted {
                         debug!(target: LOG_TARGET, "Event ID: {} accepted, adding to transactions", event_id);
                         l1_handler_txs.push(tx);
+                        let mut cache = self.event_cache.write().await;
                         cache.insert(event_id);
                         // } else {
                         //     debug!(target: LOG_TARGET, "Event ID: {} not accepted by hooker", event_id);
                         // }
-                    }
+                    // }
                 }
             }
 
@@ -204,7 +211,7 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> Messenger for StarknetM
         max_blocks: u64,
         chain_id: ChainId,
     ) -> MessengerResult<(u64, Vec<L1HandlerTx>)> {
-        debug!(target: LOG_TARGET, "Gathering messages from block: {} with max blocks: {}", from_block, max_blocks);
+        debug!(target: LOG_TARGET, "Gathering messages");
 
         let chain_latest_block: u64 = match self.provider.block_number().await {
             Ok(n) => {
@@ -220,14 +227,17 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> Messenger for StarknetM
             }
         };
 
-        let pending_txs = self.fetch_pending_events(chain_id).await?;
-
-        if from_block != chain_latest_block {
-            debug!(target: LOG_TARGET, "Block number changed from {} to {}, clearing cache", from_block, chain_latest_block);
+        // Check if the block number has changed
+        let previous_block = self.latest_block.load(Ordering::Relaxed);
+        if previous_block != chain_latest_block {
+            debug!(target: LOG_TARGET, "Block number changed from {} to {}, clearing cache", previous_block, chain_latest_block);
             self.event_cache.write().await.clear();
+            self.latest_block.store(chain_latest_block, Ordering::Relaxed);
         }
 
+        let pending_txs = self.fetch_pending_events(chain_id).await?;
         debug!(target: LOG_TARGET, "Returning {} pending transactions", pending_txs.len());
+
         Ok((chain_latest_block, pending_txs))
     }
 
