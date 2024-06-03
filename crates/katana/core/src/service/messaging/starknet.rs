@@ -108,20 +108,20 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
 
                 if let Ok(tx) = l1_handler_tx_from_event(&event, chain_id) {
                     // if let Ok((from, to, selector)) = info_from_event(&event) {
-                        // let hooker = Arc::clone(&self.hooker);
-                        // let is_message_accepted = hooker
-                        //     .read()
-                        //     .await
-                        //     .verify_message_to_appchain(from, to, selector)
-                        //     .await;
-                        // if is_message_accepted {
-                        debug!(target: LOG_TARGET, "Event ID: {} accepted, adding to transactions", event_id);
-                        l1_handler_txs.push(tx);
-                        let mut cache = self.event_cache.write().await;
-                        cache.insert(event_id);
-                        // } else {
-                        //     debug!(target: LOG_TARGET, "Event ID: {} not accepted by hooker", event_id);
-                        // }
+                    // let hooker = Arc::clone(&self.hooker);
+                    // let is_message_accepted = hooker
+                    //     .read()
+                    //     .await
+                    //     .verify_message_to_appchain(from, to, selector)
+                    //     .await;
+                    // if is_message_accepted {
+                    debug!(target: LOG_TARGET, "Event ID: {} accepted, adding to transactions", event_id);
+                    l1_handler_txs.push(tx);
+                    let mut cache = self.event_cache.write().await;
+                    cache.insert(event_id);
+                    // } else {
+                    //     debug!(target: LOG_TARGET, "Event ID: {} not accepted by hooker", event_id);
+                    // }
                     // }
                 }
             }
@@ -244,39 +244,25 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> Messenger for StarknetM
     async fn send_messages(
         &self,
         messages: &[MessageToL1],
-    ) -> MessengerResult<Vec<<Self as Messenger>::MessageHash>> {
+    ) -> MessengerResult<Vec<Self::MessageHash>> {
         if messages.is_empty() {
-            info!(target: LOG_TARGET, "No messages to send.");
             return Ok(vec![]);
         }
 
         let (hashes, calls) = parse_messages(messages)?;
 
-        for call in &calls {
-            if !self.hooker.read().await.verify_tx_for_starknet(call.clone()).await {
-                warn!(target: LOG_TARGET, "Call verification failed for call: {:?}", call);
-                continue;
-            }
-        }
-
         if !calls.is_empty() {
-            info!(target: LOG_TARGET, "Sending invoke transactions for calls.");
-            match self.send_invoke_tx(calls.clone()).await {
+            match self.send_invoke_tx(calls).await {
                 Ok(tx_hash) => {
                     trace!(target: LOG_TARGET, tx_hash = %format!("{:#064x}", tx_hash), "Invoke transaction hash.");
                 }
                 Err(e) => {
                     error!(target: LOG_TARGET, error = %e, "Sending invoke tx on Starknet.");
-                    for call in calls {
-                        self.hooker.read().await.on_starknet_tx_failed(call).await;
-                    }
                     return Err(Error::SendError);
                 }
             };
         }
-
         self.send_hashes(hashes.clone()).await?;
-
         Ok(hashes)
     }
 }
