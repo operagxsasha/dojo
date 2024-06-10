@@ -107,22 +107,22 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
                 }
 
                 if let Ok(tx) = l1_handler_tx_from_event(&event, chain_id) {
-                    // if let Ok((from, to, selector)) = info_from_event(&event) {
-                    // let hooker = Arc::clone(&self.hooker);
-                    // let is_message_accepted = hooker
-                    //     .read()
-                    //     .await
-                    //     .verify_message_to_appchain(from, to, selector)
-                    //     .await;
-                    // if is_message_accepted {
-                    debug!(target: LOG_TARGET, "Event ID: {} accepted, adding to transactions", event_id);
-                    l1_handler_txs.push(tx);
-                    let mut cache = self.event_cache.write().await;
-                    cache.insert(event_id);
-                    // } else {
-                    //     debug!(target: LOG_TARGET, "Event ID: {} not accepted by hooker", event_id);
-                    // }
-                    // }
+                    if let Ok((from, to, selector)) = info_from_event(&event) {
+                     let hooker = Arc::clone(&self.hooker);
+                         let is_message_accepted = hooker
+                             .read()
+                             .await
+                             .verify_message_to_appchain(from, to, selector)
+                             .await;
+                        if is_message_accepted {
+                            debug!(target: LOG_TARGET, "Event ID: {} accepted, adding to transactions", event_id);
+                            l1_handler_txs.push(tx);
+                            let mut cache = self.event_cache.write().await;
+                            cache.insert(event_id);
+                        } else {
+                             debug!(target: LOG_TARGET, "Event ID: {} not accepted by hooker", event_id);
+                        }
+                    }
                 }
             }
 
@@ -139,7 +139,6 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
 
     async fn send_invoke_tx(&self, calls: Vec<Call>) -> Result<FieldElement> {
         let signer = Arc::new(&self.wallet);
-
         let mut account = SingleOwnerAccount::new(
             &self.provider,
             signer,
@@ -148,13 +147,23 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
             ExecutionEncoding::New,
         );
 
+        info!(target: LOG_TARGET, "Setting block ID to Pending.");
         account.set_block_id(BlockId::Tag(BlockTag::Pending));
 
         let execution = account.execute(calls).fee_estimate_multiplier(10f64);
-        let estimated_fee = (execution.estimate_fee().await?.overall_fee) * 10u64.into();
-        let execution_with_fee = execution.max_fee(estimated_fee);
+        let estimated_fee = match execution.estimate_fee().await {
+            Ok(fee) => {
+                info!(target: LOG_TARGET, "Estimated fee: {:?}", fee.overall_fee);
+                (fee.overall_fee) * 10u64.into()
+            }
+            Err(e) => {
+                error!(target: LOG_TARGET, "Error estimating fee: {:?}", e);
+                return Err(e.into());
+            }
+        };
 
-        info!(target: LOG_TARGET, "Sending invoke transaction.");
+        let execution_with_fee = execution.max_fee(estimated_fee);
+        info!(target: LOG_TARGET, "Sending invoke transaction with max fee: {:?}", estimated_fee);
 
         match execution_with_fee.send().await {
             Ok(tx) => {
@@ -176,20 +185,23 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
             return Ok(FieldElement::ZERO);
         }
 
-        let mut calldata = hashes;
+        info!(target: LOG_TARGET, "Preparing to send {} hashes.", hashes.len());
+
+        let mut calldata = hashes.clone();
         calldata.insert(0, calldata.len().into());
 
         let call = Call {
             selector: selector!("add_messages_hashes_from_appchain"),
             to: self.messaging_contract_address,
-            calldata,
+            calldata: calldata.clone(),
         };
 
-        info!(target: LOG_TARGET, "Sending hashes to Starknet.");
+        info!(target: LOG_TARGET, "Sending hashes to Starknet: {:?}", calldata);
 
         match self.send_invoke_tx(vec![call]).await {
             Ok(tx_hash) => {
                 trace!(target: LOG_TARGET, tx_hash = %format!("{:#064x}", tx_hash), "Hashes sending transaction.");
+                info!(target: LOG_TARGET, "Successfully sent hashes with transaction hash: {:#064x}", tx_hash);
                 Ok(tx_hash)
             }
             Err(e) => {
@@ -246,23 +258,37 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> Messenger for StarknetM
         messages: &[MessageToL1],
     ) -> MessengerResult<Vec<Self::MessageHash>> {
         if messages.is_empty() {
+            info!(target: LOG_TARGET, "No messages to send.");
             return Ok(vec![]);
         }
 
         let (hashes, calls) = parse_messages(messages)?;
+        for call in &calls {
+            if !self.hooker.read().await.verify_tx_for_starknet(call.clone()).await {
+                warn!(target: LOG_TARGET, "Call verification failed for call: {:?}", call);
+                continue;
+            }
+        }
 
         if !calls.is_empty() {
-            match self.send_invoke_tx(calls).await {
-                Ok(tx_hash) => {
-                    trace!(target: LOG_TARGET, tx_hash = %format!("{:#064x}", tx_hash), "Invoke transaction hash.");
+            info!(target: LOG_TARGET, "Sending {} calls.", calls.len());
+            if let Err(e) = self.send_invoke_tx(calls.clone()).await {
+                error!(target: LOG_TARGET, error = %e, "Error sending invoke transaction.");
+                for call in calls {
+                    self.hooker.read().await.on_starknet_tx_failed(call).await;
                 }
-                Err(e) => {
-                    error!(target: LOG_TARGET, error = %e, "Sending invoke tx on Starknet.");
-                    return Err(Error::SendError);
-                }
-            };
+                return Err(Error::SendError);
+            }
+            info!(target: LOG_TARGET, "Successfully sent invoke transaction.");
         }
-        self.send_hashes(hashes.clone()).await?;
+
+        if let Err(e) = self.send_hashes(hashes.clone()).await {
+            error!(target: LOG_TARGET, error = %e, "Error sending hashes.");
+            return Err(Error::SendError);
+        }
+        info!(target: LOG_TARGET, "Successfully sent hashes.");
+
+        info!(target: LOG_TARGET, "Finished sending messages.");
         Ok(hashes)
     }
 }
