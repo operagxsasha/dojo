@@ -120,7 +120,13 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
                             let mut cache = self.event_cache.write().await;
                             cache.insert(event_id);
                         } else {
-                             debug!(target: LOG_TARGET, "Event ID: {} not accepted by hooker", event_id);
+                             debug!(
+                                 target: LOG_TARGET,
+                                 "Event ID: {} not accepted by hooker, check the contract addresses defined in the hooker: executor address: {:?}, orderbook address: {:?}",
+                                 event_id,
+                                 from,
+                                 to
+                             );
                         }
                     }
                 }
