@@ -1,10 +1,8 @@
-use starknet::{
-    accounts::{ExecutionEncoding, SingleOwnerAccount},
-    core::types::FieldElement,
-    providers::{jsonrpc::HttpTransport, AnyProvider, JsonRpcClient, Provider},
-    signers::{LocalWallet, SigningKey},
-};
-
+use starknet::accounts::{ExecutionEncoding, SingleOwnerAccount};
+use starknet::core::types::FieldElement;
+use starknet::providers::jsonrpc::HttpTransport;
+use starknet::providers::{AnyProvider, JsonRpcClient, Provider};
+use starknet::signers::{LocalWallet, SigningKey};
 use url::Url;
 
 /// Initializes a new account to interact with Starknet.

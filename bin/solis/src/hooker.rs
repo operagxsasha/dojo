@@ -1,37 +1,34 @@
 //! Solis hooker on Katana transaction lifecycle.
-//!
-use crate::contracts::starknet_utils::{ExecutionInfo, U256};
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
+use std::path::Path;
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use cainome::cairo_serde::CairoSerde;
 use cainome::rs::abigen;
 use katana_core::hooker::{HookerAddresses, KatanaHooker};
 use katana_core::sequencer::KatanaSequencer;
 use katana_executor::ExecutorFactory;
-
 use katana_primitives::chain::ChainId;
 use katana_primitives::contract::ContractAddress;
 use katana_primitives::transaction::{ExecutableTx, ExecutableTxWithHash, L1HandlerTx};
 use katana_primitives::utils::transaction::compute_l1_message_hash;
-use serde_json::json;
-use serde_json::Value;
+use serde_json::{json, Value};
 use starknet::accounts::Call;
-use starknet::core::types::BroadcastedInvokeTransaction;
-use starknet::core::types::FieldElement;
+use starknet::core::types::{BroadcastedInvokeTransaction, FieldElement};
 use starknet::macros::selector;
 use starknet::providers::Provider;
-use std::fs::File;
-use std::fs::OpenOptions;
-use std::io::Read;
-use std::io::Write;
-use std::path::Path;
-use std::sync::Arc;
+
+use crate::contracts::starknet_utils::{ExecutionInfo, U256};
 
 const FILE_PATH_ADDRESSES: &str = "addresses.json";
+
+use tracing::info;
 
 use crate::contracts::orderbook::{OrderV1, RouteType};
 use crate::contracts::starknet_utils::StarknetUtilsReader;
 use crate::CHAIN_ID_SOLIS;
-use tracing::info;
 
 #[allow(dead_code)]
 pub enum CancelStatus {
@@ -287,8 +284,8 @@ impl<P: Provider + Sync + Send + 'static + std::fmt::Debug, EF: ExecutorFactory>
     ///
     /// In the case of Solis, `L1HandlerTransaction` are sent by Solis for two purposes:
     /// 1. A message was collected from the L2, and it must be executed.
-    /// 2. A transaction has been rejected by Solis (asset faults), and the order
-    ///    must then be updated.
+    /// 2. A transaction has been rejected by Solis (asset faults), and the order must then be
+    ///    updated.
     ///
     /// This function is used for the scenario 2. For this reason, the `from_address`
     /// field is automatically filled up by the sequencer to use the executor address
@@ -395,8 +392,8 @@ impl<P: Provider + Sync + Send + 'static + std::fmt::Debug, EF: ExecutorFactory>
 
     /// Verifies an invoke transaction that is:
     /// 1. Directed to the orderbook only.
-    /// 2. With the selector `create_order` only as the fulfill
-    ///    is verified by `verify_message_to_starknet_before_tx`.
+    /// 2. With the selector `create_order` only as the fulfill is verified by
+    ///    `verify_message_to_starknet_before_tx`.
     async fn verify_invoke_tx_before_pool(
         &self,
         transaction: BroadcastedInvokeTransaction,
@@ -513,8 +510,9 @@ impl<P: Provider + Sync + Send + 'static + std::fmt::Debug, EF: ExecutorFactory>
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use starknet::macros::{felt, selector};
+
+    use super::*;
 
     #[test]
     fn test_calldata_calls_parsing_new_encoding() {

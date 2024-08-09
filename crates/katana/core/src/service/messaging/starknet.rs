@@ -1,4 +1,7 @@
-use crate::hooker::KatanaHooker;
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
 use anyhow::Result;
 use async_trait::async_trait;
 use katana_primitives::chain::ChainId;
@@ -12,14 +15,12 @@ use starknet::macros::{felt, selector};
 use starknet::providers::jsonrpc::HttpTransport;
 use starknet::providers::{AnyProvider, JsonRpcClient, Provider};
 use starknet::signers::{LocalWallet, SigningKey};
-use std::collections::HashSet;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use tokio::sync::RwLock as AsyncRwLock;
 use tracing::{debug, error, info, trace, warn};
 use url::Url;
 
 use super::{Error, MessagingConfig, Messenger, MessengerResult, LOG_TARGET};
+use crate::hooker::KatanaHooker;
 
 const MSG_MAGIC: FieldElement = felt!("0x4d5347");
 const EXE_MAGIC: FieldElement = felt!("0x455845");
@@ -225,8 +226,8 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> Messenger for StarknetM
 
     async fn gather_messages(
         &self,
-        from_block: u64,
-        max_blocks: u64,
+        _from_block: u64,
+        _max_blocks: u64,
         chain_id: ChainId,
     ) -> MessengerResult<(u64, Vec<L1HandlerTx>)> {
         debug!(target: LOG_TARGET, "Gathering messages");

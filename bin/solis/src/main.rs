@@ -2,7 +2,6 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use crate::hooker::SolisHooker;
 use clap::{CommandFactory, Parser};
 use clap_complete::{generate, Shell};
 use console::Style;
@@ -22,6 +21,8 @@ use starknet::core::types::FieldElement;
 use tokio::signal::ctrl_c;
 use tokio::sync::RwLock as AsyncRwLock;
 use tracing::info;
+
+use crate::hooker::SolisHooker;
 
 mod args;
 mod contracts;
