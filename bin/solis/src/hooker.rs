@@ -184,16 +184,17 @@ impl<P: Provider + Sync + Send + 'static + std::fmt::Debug, EF: ExecutorFactory>
         }
 
         // ERC20 to ERC721 : we check the allowance and the offerer balance.
-        if order.route == RouteType::Erc20ToErc721 && !self
-            .verify_balance(&BalanceVerifier {
-                currency_address: ContractAddress(order.currency_address.into()),
-                offerer: cainome::cairo_serde::ContractAddress(order.offerer.into()),
-                start_amount: U256 {
-                    low: order.start_amount.low,
-                    high: order.start_amount.high,
-                },
-            })
-            .await
+        if order.route == RouteType::Erc20ToErc721
+            && !self
+                .verify_balance(&BalanceVerifier {
+                    currency_address: ContractAddress(order.currency_address.into()),
+                    offerer: cainome::cairo_serde::ContractAddress(order.offerer.into()),
+                    start_amount: U256 {
+                        low: order.start_amount.low,
+                        high: order.start_amount.high,
+                    },
+                })
+                .await
         {
             println!("verify balance for starknet before failed");
             return false;

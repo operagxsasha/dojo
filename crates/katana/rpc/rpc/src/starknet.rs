@@ -36,9 +36,9 @@ use katana_rpc_types::{
 use katana_rpc_types_builder::ReceiptBuilder;
 use katana_tasks::{BlockingTaskPool, TokioTaskSpawner};
 use starknet::core::types::{
-    BlockTag, DeclareTransactionTrace, DeployAccountTransactionTrace,
-    ExecuteInvocation, InvokeTransactionTrace, L1HandlerTransactionTrace, RevertedInvocation,
-    SimulatedTransaction, TransactionExecutionStatus, TransactionStatus, TransactionTrace,
+    BlockTag, DeclareTransactionTrace, DeployAccountTransactionTrace, ExecuteInvocation,
+    InvokeTransactionTrace, L1HandlerTransactionTrace, RevertedInvocation, SimulatedTransaction,
+    TransactionExecutionStatus, TransactionStatus, TransactionTrace,
 };
 
 pub struct StarknetApi<EF: ExecutorFactory> {
