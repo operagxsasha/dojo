@@ -36,9 +36,9 @@ use katana_rpc_types::{
 use katana_rpc_types_builder::ReceiptBuilder;
 use katana_tasks::{BlockingTaskPool, TokioTaskSpawner};
 use starknet::core::types::{
-    BlockTag, BroadcastedInvokeTransaction, DeclareTransactionTrace, DeployAccountTransactionTrace, ExecuteInvocation,
-    InvokeTransactionTrace, L1HandlerTransactionTrace, RevertedInvocation, SimulatedTransaction,
-    TransactionExecutionStatus, TransactionStatus, TransactionTrace,
+    BlockTag, BroadcastedInvokeTransaction, DeclareTransactionTrace, DeployAccountTransactionTrace,
+    ExecuteInvocation, InvokeTransactionTrace, L1HandlerTransactionTrace, RevertedInvocation,
+    SimulatedTransaction, TransactionExecutionStatus, TransactionStatus, TransactionTrace,
 };
 
 pub struct StarknetApi<EF: ExecutorFactory> {
@@ -675,11 +675,10 @@ impl<EF: ExecutorFactory> StarknetApiServer for StarknetApi<EF> {
         &self,
         invoke_transaction: BroadcastedInvokeTx,
     ) -> RpcResult<InvokeTxResult> {
-
         if let Some(hooker) = &self.inner.sequencer.hooker {
             let tx = invoke_transaction.0.clone();
             if !hooker.read().await.verify_invoke_tx_before_pool(tx).await {
-               return Err(StarknetApiError::SolisAssetFault.into());
+                return Err(StarknetApiError::SolisAssetFault.into());
             }
         }
         self.on_io_blocking_task(move |this| {

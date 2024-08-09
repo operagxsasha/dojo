@@ -108,25 +108,25 @@ impl<EF: katana_executor::ExecutorFactory + Send + Sync> StarknetMessaging<EF> {
 
                 if let Ok(tx) = l1_handler_tx_from_event(&event, chain_id) {
                     if let Ok((from, to, selector)) = info_from_event(&event) {
-                     let hooker = Arc::clone(&self.hooker);
-                         let is_message_accepted = hooker
-                             .read()
-                             .await
-                             .verify_message_to_appchain(from, to, selector)
-                             .await;
+                        let hooker = Arc::clone(&self.hooker);
+                        let is_message_accepted = hooker
+                            .read()
+                            .await
+                            .verify_message_to_appchain(from, to, selector)
+                            .await;
                         if is_message_accepted {
                             debug!(target: LOG_TARGET, "Event ID: {} accepted, adding to transactions", event_id);
                             l1_handler_txs.push(tx);
                             let mut cache = self.event_cache.write().await;
                             cache.insert(event_id);
                         } else {
-                             debug!(
-                                 target: LOG_TARGET,
-                                 "Event ID: {} not accepted by hooker, check the contract addresses defined in the hooker: executor address: {:?}, orderbook address: {:?}",
-                                 event_id,
-                                 from,
-                                 to
-                             );
+                            debug!(
+                                target: LOG_TARGET,
+                                "Event ID: {} not accepted by hooker, check the contract addresses defined in the hooker: executor address: {:?}, orderbook address: {:?}",
+                                event_id,
+                                from,
+                                to
+                            );
                         }
                     }
                 }

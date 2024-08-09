@@ -25,18 +25,9 @@ pub async fn new_account(
         AnyProvider::JsonRpcHttp(JsonRpcClient::new(HttpTransport::new(rpc_url.clone())));
 
     // TODO: need error instead of expect.
-    let chain_id = provider
-        .chain_id()
-        .await
-        .expect("couldn't get chain_id from provider");
+    let chain_id = provider.chain_id().await.expect("couldn't get chain_id from provider");
 
     let signer = LocalWallet::from(SigningKey::from_secret_scalar(private_key));
 
-    SingleOwnerAccount::new(
-        provider,
-        signer,
-        account_address,
-        chain_id,
-        ExecutionEncoding::Legacy,
-    )
+    SingleOwnerAccount::new(provider, signer, account_address, chain_id, ExecutionEncoding::Legacy)
 }
