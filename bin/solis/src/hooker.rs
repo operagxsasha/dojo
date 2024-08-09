@@ -32,19 +32,19 @@ use crate::CHAIN_ID_SOLIS;
 
 #[allow(dead_code)]
 pub enum CancelStatus {
-    CancelledUser,
-    CancelledByNewOrder,
-    CancelledAssetFault,
-    CancelledOwnership,
+    User,
+    ByNewOrder,
+    AssetFault,
+    Ownership,
 }
 
 impl CancelStatus {
     fn to_u32(&self) -> u32 {
         match self {
-            CancelStatus::CancelledUser => 1,
-            CancelStatus::CancelledByNewOrder => 2,
-            CancelStatus::CancelledAssetFault => 3,
-            CancelStatus::CancelledOwnership => 4,
+            CancelStatus::User => 1,
+            CancelStatus::ByNewOrder => 2,
+            CancelStatus::AssetFault => 3,
+            CancelStatus::Ownership => 4,
         }
     }
 }
@@ -184,23 +184,21 @@ impl<P: Provider + Sync + Send + 'static + std::fmt::Debug, EF: ExecutorFactory>
         }
 
         // ERC20 to ERC721 : we check the allowance and the offerer balance.
-        if order.route == RouteType::Erc20ToErc721 {
-            if !self
-                .verify_balance(&BalanceVerifier {
-                    currency_address: ContractAddress(order.currency_address.into()),
-                    offerer: cainome::cairo_serde::ContractAddress(order.offerer.into()),
-                    start_amount: U256 {
-                        low: order.start_amount.low,
-                        high: order.start_amount.high,
-                    },
-                })
-                .await
-            {
-                println!("verify balance for starknet before failed");
-                return false;
-            }
+        if order.route == RouteType::Erc20ToErc721 && !self
+            .verify_balance(&BalanceVerifier {
+                currency_address: ContractAddress(order.currency_address.into()),
+                offerer: cainome::cairo_serde::ContractAddress(order.offerer.into()),
+                start_amount: U256 {
+                    low: order.start_amount.low,
+                    high: order.start_amount.high,
+                },
+            })
+            .await
+        {
+            println!("verify balance for starknet before failed");
+            return false;
         }
-        return true;
+        true
     }
 }
 
@@ -312,7 +310,7 @@ impl<P: Provider + Sync + Send + 'static + std::fmt::Debug, EF: ExecutorFactory>
 
         // The calldata always starts with the from_address.
         let mut calldata: Vec<FieldElement> = vec![from_address];
-        for p in payload.into_iter() {
+        for p in payload.iter() {
             calldata.push(*p);
         }
 
@@ -352,7 +350,7 @@ impl<P: Provider + Sync + Send + 'static + std::fmt::Debug, EF: ExecutorFactory>
         self.sn_executor_address = addresses.executor_starknet;
 
         let path = Path::new(FILE_PATH_ADDRESSES);
-        let file = OpenOptions::new().write(true).create(true).open(&path);
+        let file = OpenOptions::new().write(true).create(true).open(path);
 
         match file {
             Ok(mut file) => {
@@ -361,7 +359,7 @@ impl<P: Provider + Sync + Send + 'static + std::fmt::Debug, EF: ExecutorFactory>
                     "sn_executor_address": format!("{:#x}", self.sn_executor_address)
                 });
 
-                if let Err(e) = writeln!(file, "{}", data.to_string()) {
+                if let Err(e) = writeln!(file, "{}", data) {
                     eprintln!("Error writing file : {}", e);
                 }
             }
@@ -456,7 +454,7 @@ impl<P: Provider + Sync + Send + 'static + std::fmt::Debug, EF: ExecutorFactory>
         let owner_ship_verification = self.verify_ownership(&verifier).await;
         if !owner_ship_verification {
             // rollback the status
-            let status = CancelStatus::CancelledOwnership;
+            let status = CancelStatus::Ownership;
 
             self.add_l1_handler_transaction_for_orderbook(
                 selector!("rollback_status_order"),
@@ -477,7 +475,7 @@ impl<P: Provider + Sync + Send + 'static + std::fmt::Debug, EF: ExecutorFactory>
             .await
         {
             // rollback the status
-            let status = CancelStatus::CancelledAssetFault;
+            let status = CancelStatus::AssetFault;
 
             self.add_l1_handler_transaction_for_orderbook(
                 selector!("rollback_status_order"),
