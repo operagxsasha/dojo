@@ -18,3 +18,7 @@ crates/benches/bench_results.txt
 .vscode
 bindings
 ./bin/solis/.env
+
+messaging.local.json
+addresses.json
+existing-katana-db

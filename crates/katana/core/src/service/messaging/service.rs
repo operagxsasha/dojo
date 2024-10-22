@@ -86,7 +86,12 @@ impl<EF: ExecutorFactory> MessagingService<EF> {
         // 200 avoids any possible rejection from RPC with possibly lots of messages.
         // TODO: May this be configurable?
         let max_block = 200;
-
+        info!(
+            target: LOG_TARGET,
+            "Starting gather_messages from block {} with max_block {}",
+            from_block,
+            max_block
+        );
         match messenger.as_ref() {
             MessengerMode::Ethereum(inner) => {
                 let (block_num, txs) =
@@ -113,7 +118,12 @@ impl<EF: ExecutorFactory> MessagingService<EF> {
                     trace_l1_handler_tx_exec(hash, &tx);
                     pool.add_transaction(ExecutableTxWithHash { hash, transaction: tx.into() })
                 });
-
+                info!(
+                    target: LOG_TARGET,
+                    "gather_messages finished. Last block: {}, tx count: {}",
+                    block_num,
+                    txs_count
+                );
                 Ok((block_num, txs_count))
             }
         }
